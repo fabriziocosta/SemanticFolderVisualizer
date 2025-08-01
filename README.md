@@ -8,6 +8,12 @@ An AI-powered visual explorer that transforms folder structures into interactive
 **Unleash the hidden stories inside your folders.** This AI-powered Semantic Folder Visualizer transforms ordinary file structures into stunning, interactive maps of meaning. Powered by GPT and D3.js, it doesn’t just show you what’s inside a directory—it tells you *why it matters*. Summarize contents, reveal hidden themes, and explore your digital archives like a living ecosystem. Whether you're a researcher, designer, or digital hoarder, this tool makes your data not just visible, but *understandable*.
 
 ---
+As you hover over the sectors, detailed information about the folder’s contents appears at the bottom, while the full trail of ancestor folders is displayed on the right. Clicking on a sector recentres the view around that folder, allowing you to seamlessly dive deeper. In this way, you can:
+
+1. **Descend interactively into the folder you’re interested in**, and
+2. **Explore its contents in context**, without losing your place in the hierarchy.
+---
+
 
 ### **Purpose**
 
