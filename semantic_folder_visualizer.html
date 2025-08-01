@@ -615,7 +615,7 @@ function loadSemanticInfo(cacheKey){
         g.attr('transform', `translate(${w / 2},${h / 2})`).selectAll('path').data(nodes).join('path')
         .attr('d', arc)
         .attr('fill', d => {
-            /* store base colour so we can restore it later */
+            // Store initial color for hover state restoration
             if (d.depth === 0){
                 d._baseColor = '#fff';
             }else{
@@ -626,24 +626,24 @@ function loadSemanticInfo(cacheKey){
             return d._baseColor;
         })
         .attr('stroke', '#fff')
-        .style('cursor', 'pointer')   /* NEW – leaf nodes look clickable too */
+        .style('cursor', 'pointer')   // All segments are clickable
         .on('mouseover', function (e, d) {
             d3.select(this)
               .attr('fill', d3.color(d._baseColor).darker(0.7).formatRgb())
               .attr('filter', 'url(#glow)');
         })
         .on('click', (e, d) => {
-            /* NEW — rebuild full path: top-level root → … → clicked node */
+            // Rebuild path from root to clicked node
             crumbs = [];
-            let n = d.data;                    // start at clicked node’s data object
+            let n = d.data;                    // Start with clicked node
             while (n) {
-                crumbs.unshift(n);             // unshift puts root first
-                n = n.parentRef;               // climb the stored parent chain
+                crumbs.unshift(n);             // Build path from root down
+                n = n.parentRef;               // Walk up parent chain
             }
 
-            updateBreadcrumbs();               // show the entire trace
+            updateBreadcrumbs();               // Update navigation trail
 
-            /* Zoom only if the target is a folder */
+            // Only zoom if clicking on a folder
             if (d.children) {
                 render(depth);
             }
@@ -690,10 +690,10 @@ function loadSemanticInfo(cacheKey){
     const files = [...e.target.files];
     if (!files.length)
         return;
-    selectedFiles = files;     /* NEW — cache selection for “Refresh” */
+    selectedFiles = files;     // cache selection for refresh
 
-    /* ---------- show scan progress ---------- */
-    $('progressWrap').style.display = 'block';
+    // Show scan progress bar
+    $('progressWrap').style.display = 'block'; 
     $('progressBar').style.width = '0%'; // reset once at start
 
     setProgressPhase('#2196f3'); // blue for scan
