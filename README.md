@@ -13,7 +13,10 @@ As you hover over the sectors, detailed information about the folder’s content
 1. **Descend interactively into the folder you’re interested in**, and
 2. **Explore its contents in context**, without losing your place in the hierarchy.
 ---
+To run the visualizer, simply **save the HTML file anywhere on your computer and open it in a browser**—Safari works best. To unlock semantic summaries, you’ll need to **enter your OpenAI API key** when prompted. Then, **select a root folder** to begin exploring. If you skip the API key, the tool will still work, but it will display cleaned-up filenames rather than semantic summaries.
 
+> 🔍 Note: Summaries are **recursively computed based only on filenames**, not the actual file contents.
+---
 
 ### **Purpose**
 
