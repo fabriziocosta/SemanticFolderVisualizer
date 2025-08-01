@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <title>Semantic Folder Visualizer</title>
+    <!-- Better fonts -->
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+    :root {
+        --border: 1px solid #fff;
+    }
+
+    body {
+        margin: 0;
+        position: relative;          /* keeps stacking context */
+        height: 100vh;               /* NEW – let absolutely-positioned SVG fill viewport */
+        overflow: hidden;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont,
+                     'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+        background: #1a1a1a;         /* hard fallback colour */
+    }
+    
+    /* larger white core → quick fade to pale-blue */
+    body::before{
+        content:"";
+        position:fixed;
+        inset:0;
+        z-index:-1;
+
+        /* 0-40 % pure white → 40-70 % fast gradient → 100 % background-blue */
+        background:radial-gradient(circle at 50% 50%,
+                #ffffff 0%,        /* centre */
+                #ffffff 40%,
+                #eaf4ff 55%,
+                #d6e8ff 70%);
+
+        animation:bgPulse .9s ease-out forwards;
+    }
+
+
+    @keyframes bgPulse{
+      0%  { transform:scale(0); opacity:0; }
+      100%{ transform:scale(1); opacity:1; }
+    }
+
+    svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+        z-index: 0;
+    }/* Controls */
+
+    #controls {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        display: flex;
+        gap: 12px;
+        z-index: 5;
+    }
+
+    button {
+        padding: 8px 14px;
+        font-size: 14px;
+        background: #797db7;
+        color: #fff;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+
+    #depthCtl {
+        margin-left: auto;
+        background: #fff;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        padding: 4px 8px;
+        font-size: 13px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }/* Breadcrumb column */
+
+    #breadcrumbs {
+        position: absolute;
+        top: 90px;
+        left: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        z-index: 4;
+    }
+
+    #breadcrumbs span {
+        cursor: pointer;
+        border: var(--border);
+        padding: 2px 6px;
+        background: rgba(255,255,255,.3);   /* subtle box */
+        color: #5c7bad;
+        white-space: nowrap;
+    }/* Ancestor stack */
+
+    #ancestors {
+        position: absolute;
+        right: 10px;
+        bottom: 160px;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;          /* NEW – make every span full-width */
+        gap: 6px;
+        z-index: 4;
+    }
+
+    #ancestors span {
+        border: var(--border);
+        padding: 2px 6px;
+        background: rgba(255,255,255,.3);
+        color: #111;
+        width: 100%;                   /* NEW – equal box width */
+        text-align: right;             /* keep labels flush right */
+    }/* Children row */
+
+    #children {
+        position: absolute;
+        left: 10px;
+        right: 10px;                   /* full-width strip */
+        bottom: 10px;
+        display: flex;
+        flex-wrap: wrap;               /* 🔑 allow multi-line */
+        justify-content: flex-end;     /* NEW – lines start at the right */
+        gap: 6px 8px;                  /* row / col gap */
+        max-height: 8em;               /* cap growth (≈5–6 lines) */
+        overflow-y: auto;              /* vertical scroll if still too many */
+        z-index: 4;
+    }
+
+    #children span {
+        border: var(--border);
+        padding: 2px 6px;
+        background: rgba(255,255,255,.3);
+        color: #111;
+        font-size: clamp(12px, 1.1vw, 14px);
+        letter-spacing: -.02em;
+    }/* Tooltip */
+
+    .tooltip {
+        position: absolute;
+        background: #111;
+        color: #f8f8f8;
+        padding: 10px 12px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,.4);
+        font-size: 13px;
+        line-height: 1.35;
+        pointer-events: none;
+        max-width: 260px;
+        display: none;
+        z-index: 6;
+    }
+    /* file names & MB line inside tooltip */
+    .tooltip small{
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 11px;
+        letter-spacing: -.015em;
+    }/* Progress */
+
+    #progressWrap {
+        position: absolute;
+        top: 0;
+        left: 0;
+        height: 4px;
+        width: 100%;
+        background: #ddd;
+        z-index: 6;
+        display: none;
+    }
+
+    #progressBar {
+        height: 100%;
+        width: 0;
+        transition: width 0.2s;
+        background: var(--progress-color, #4caf50);
+    }/* Modal */
+
+    #overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, .55);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 7;
+    }
+
+    #modal {
+        background: #fff;
+        padding: 20px;
+        border-radius: 6px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, .3);
+        width: 340px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    #modal input {
+        width: 100%;
+        padding: 6px;
+        font-size: 14px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+    }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <button id="pickBtn">Select Folder</button>
+        <button id="refreshBtn">Refresh</button>
+        <button id="apiBtn">API Key</button>
+        <input type="file" id="filePicker" directory webkitdirectory multiple hidden/>
+        <div id="depthCtl">
+            Depth 
+            <input type="range" id="depthRange" min="1" max="8" value="3">
+            <span id="depthVal">3</span>
+        </div>
+    </div>
+
+    <div id="progressWrap">
+        <div id="progressBar"></div>
+    </div>
+    <div id="breadcrumbs"></div>
+    <div id="ancestors"></div>
+    <div id="children"></div>
+
+    <svg>
+        <g></g>
+    </svg>
+    <div id="tooltip" class="tooltip"></div>
+
+    <!-- API Key Modal -->
+    <div id="overlay">
+        <div id="modal">
+            <h3>Set OpenAI API Key</h3>
+            <input id="apiInput" placeholder="sk-..."/>
+            <div style="display:flex;gap:8px;justify-content:flex-end">
+                <button id="cancelKey">Cancel</button>
+                <button id="saveKey">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    /***************** Globals & helpers *****************/
+    const $ = id => document.getElementById(id); // unique, avoids collisions
+
+function setProgressPhase(color) {
+    $('progressBar').style.setProperty('--progress-color', color);
+}
+
+function updateProgress(ratio) {
+    $('progressBar').style.width = `${(ratio * 100).toFixed(1)}%`;
+}
+
+    const tooltip = $('tooltip');
+    const svg = d3.select('svg');
+    const g = svg.select('g');
+    // ---------- SVG glow filter -----------
+    if (!document.getElementById('glow')) {
+      svg.insert('defs', 'g').html(`
+    <filter id="glow" height="150%" width="150%" x="-25%" y="-25%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>`);
+    }
+    const rainbow = d3.scaleSequential(d3.interpolateRainbow).domain([0, 2 * Math.PI]);
+    let crumbs = [];
+    let currentFP = '';   // set on file-picker change
+    let selectedFiles = [];        // NEW — remember the last file list
+    // strip " and ' from any label
+    const stripQuotes = s => (s || '').replace(/[\"']/g, '');
+    // convenience for UI text
+    const displayText = n => stripQuotes(n.title || n.name);
+    // semantic-cache key prefix (lost in last edit)
+    const CACHE_PREFIX = "semantic-folder:";
+
+    // stable path helper  ("root/photos/2024")
+    function nodePath(node){
+      const names=[];
+      while(node){ names.unshift(node.name); node=node.parentRef; }
+      return names.join('/');
+    }
+
+    // summary cache helpers
+    function loadSummary(fp,path){
+      return localStorage.getItem(`${CACHE_PREFIX}${fp}:${path}:summary`);
+    }
+    function saveSummary(fp,path,text){
+      localStorage.setItem(`${CACHE_PREFIX}${fp}:${path}:summary`, text);
+    }
+
+    // build GPT prompts -------------
+    const phrasePrompt = t=>`Condense "${t}" into ≤6 descriptive words.`;
+    function paragraphPrompt(folder){
+      const bulletList = folder.children.map(ch=>'• '+ch.summary).join('\n');
+      return `Overview for folder "${folder.title}":\n${bulletList}\n≤40 words.`;
+    }
+
+    // ensureSummary(node) -------------
+    async function ensureSummary(node, fp){
+      // --- progress helpers -----------
+      const bar   = $("progressBar");
+      const wrap  = $("progressWrap");
+      let total   = 0, done = 0;
+      const begin = (n)=>{ total=n; if(n){ wrap.style.display="block"; bar.style.width="0"; } };
+      const tick  = ()=>{ done++; bar.style.width = `${(done/total)*100}%`; };
+      const end   = ()=>{ wrap.style.display="none"; };
+
+      if(node.summary) return node.summary;               // already in-memory
+      const p   = nodePath(node);
+      const hit = loadSummary(fp,p);
+      if(hit){ node.summary = hit; return hit; }
+
+      // ---- Phase A — make sure each direct child has a phrase ----
+      if(node.children && node.children.length){
+        begin( (node.children.some(ch=>!loadSummary(fp,nodePath(ch))) ? 1 : 0) + 1 ); // child-batch + parent
+
+        // ----- batch all child titles in one prompt -----
+        const titles = node.children.map(c=>c.title || cleanName(c.name));
+        const batchPrompt = `Return a JSON array of ≤6-word phrases summarising:\n` +
+                        titles.map((t,i)=>`${i+1}. ${t}`).join('\n');
+
+        let phrases = [];
+        try{
+          phrases = JSON.parse(await gpt(batchPrompt));
+        }catch(e){ console.warn('parse fail',e); }
+
+        await Promise.all(node.children.map(async (ch,idx)=>{
+          if(ch.summary) return;
+          ch.summary = stripQuotes(phrases[idx] || titles[idx]);
+          saveSummary(fp, nodePath(ch), ch.summary);
+        }));
+        tick(); // child batch done
+      }
+
+      // ---- Phase B — paragraph for this node ----
+      if(node.children && node.children.length){
+        node.summary = stripQuotes(await gpt(paragraphPrompt(node)));
+        tick(); // parent summary done
+      }else{
+        node.summary = '';  // files get empty summary
+      }
+      saveSummary(fp,p,node.summary);
+
+      end();
+      return node.summary;
+    }
+
+    /***************** Safari notice *****************/
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    if (isSafari && !('webkitdirectory' in document.createElement('input'))) {
+        $('pickBtn').textContent = 'Select Files';
+        $('pickBtn').title = 'Safari does not support folder selection – pick files instead';
+    }
+
+    /***************** API Key modal *****************/
+    $('apiBtn').addEventListener('click', () => {
+        $('apiInput').value = localStorage.getItem('OPENAI_KEY') || '';
+        $('overlay').style.display = 'flex';
+    });
+    $('cancelKey').onclick = () => $('overlay').style.display = 'none';
+    $('saveKey').onclick = () => {
+        localStorage.setItem('OPENAI_KEY', $('apiInput').value.trim());
+        $('overlay').style.display = 'none';
+    };
+
+    /* Directory tree helpers */
+    const SKIP = ['__pycache__', '.ipynb_checkpoints', '.git', 'node_modules', '.DS_Store'];
+
+/* NEW: buildTree now accepts a progress callback */
+function buildTree(files, onProgress = null) {
+    const rootName = files[0]?.webkitRelativePath?.split('/')?.[0] || 'root';
+    const root = { name: rootName, children: [], parentRef: null };
+    files.forEach((file, idx) => {
+        const rel = file.webkitRelativePath || file.name;
+        const parts = rel.split('/');
+        let node = root;
+        let ignore = false;
+        for (let i = 1; i < parts.length; i++) {
+            const seg = parts[i];
+            if (seg.startsWith('.') || SKIP.includes(seg)) {
+                ignore = true;
+                break;
+            }
+            let child = node.children.find(c => c.name === seg);
+            if (!child) {
+                child = {
+                    name: seg,
+                    children: i < parts.length - 1 ? [] : undefined,
+                    size: i === parts.length - 1 ? file.size / 1e6 : 0,
+                    parentRef: node
+                };
+                node.children.push(child);
+            }
+            node = child;
+        }
+        if (ignore) return;
+
+        /* update progress bar */
+        if (onProgress) onProgress(idx + 1, files.length);
+    });
+    computeSizes(root);
+    return root;
+}
+    function computeSizes(n) {
+        if (n.children)
+            n.size = n.children.reduce((s, c) => s + computeSizes(c), 0);
+        return n.size || 0;
+    }
+    // ------------------ semantic cache helpers ------------------
+    // crc-like helper for a quick folder fingerprint
+    function hashString(str) {
+  let h = 0; for (let i = 0; i < str.length; i++) h = (h << 5) - h + str.charCodeAt(i) & 0xffff_ffff;
+  return (h >>> 0).toString(36);
+}
+
+function folderFingerprint(files) {
+  return hashString(
+    files.map(f => `${f.webkitRelativePath}|${f.size}`).sort().join("∥")
+  );
+}
+
+// -------- cycle-safe (de)serialisation helpers --------
+function stripParents(node){
+  const { parentRef, ...clone } = node;
+  if(clone.children) clone.children = clone.children.map(stripParents);
+  return clone;
+}
+
+function restoreParents(node, parent = null){
+  node.parentRef = parent;
+  if(node.children) node.children.forEach(ch => restoreParents(ch, node));
+}
+
+function saveSemanticInfo(cacheKey, root){
+  localStorage.setItem(
+    CACHE_PREFIX + cacheKey,
+    JSON.stringify(stripParents(root))
+  );
+}
+
+function loadSemanticInfo(cacheKey){
+  const raw = localStorage.getItem(CACHE_PREFIX + cacheKey);
+  if(!raw) return null;
+  const tree = JSON.parse(raw);
+  restoreParents(tree);
+  return tree;
+}
+
+    /***************** LLM semantic titles *****************/
+    function cleanName(n) {
+        return n.replace(/[_-]/g, ' ').replace(/\.[^.]+$/, '');
+    }
+    function allFiles(n, a=[]) {
+        if (!n.children)
+            a.push(n);
+        else
+            n.children.forEach(c => allFiles(c, a));
+        return a;
+    }
+    function folderList(n, a=[]) {
+        if (n.children) {
+            a.push(n);
+            n.children.forEach(c => folderList(c, a));
+        }
+        return a;
+    }
+    async function gpt(prompt) {
+        const key = localStorage.getItem('OPENAI_KEY');
+        if (!key)
+            return '';
+        try {
+            const res = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${key}`
+                },
+                body: JSON.stringify({
+                    model: 'gpt-4o-mini',
+                    messages: [{
+                        role: 'user',
+                        content: prompt
+                    }],
+                    temperature: 0.3,
+                    max_tokens: 60
+                })
+            });
+            const j = await res.json();
+            return j?.choices?.[0]?.message?.content?.trim() || '';
+        } catch (e) {
+            console.error(e);
+            return '';
+        }
+    }
+    async function assignTitles(root, force = false, onProgress = null) {
+        allFiles(root).forEach(f => f.title = cleanName(f.name));
+        const folders = folderList(root).reverse();
+        if (!folders.length) return;
+
+        const key = localStorage.getItem("OPENAI_KEY");
+        if (!key) {
+            // Fallback: assign cleaned names silently
+            folders.forEach(folder => folder.title = cleanName(folder.name));
+            return;
+        }
+
+        if (onProgress) onProgress(0);
+        let done = 0;
+        for (const folder of folders) {
+            if (!force && folder.title && folder.title !== cleanName(folder.name)) {
+                done++;
+                if (onProgress) onProgress(done / folders.length);
+                continue; // skip already-titled folders unless forced
+            }
+            const prompt = `Folder name: ${folder.name}. Children titles: ${(folder.children || []).map(c => c.title).join(', ')}. Provide ONE concise semantic title (<=8 words).`;
+            const raw = await gpt(prompt);
+            folder.title = stripQuotes(raw) || cleanName(folder.name);
+            done++;
+            if (onProgress) onProgress(done / folders.length);
+        }
+    }
+
+    /***************** UI helpers *****************/
+    function updateBreadcrumbs() {
+        const br = $('breadcrumbs');
+        br.innerHTML = '';
+        crumbs.forEach((n, i) => {
+            const s = document.createElement('span');
+            s.textContent = displayText(n);
+            s.onclick = () => {
+                crumbs = crumbs.slice(0, i + 1);
+                updateBreadcrumbs();
+                render(+$('depthRange').value);
+            };
+            br.appendChild(s);
+        });
+    }
+    function showAncestors(d) {
+        const a = $('ancestors');
+        a.innerHTML = '';
+        d.ancestors().reverse().forEach(n => {
+            const s = document.createElement('span');
+            s.textContent = displayText(n.data);
+            a.appendChild(s);
+        });
+    }
+    function showChildren(d) {
+        const c = $('children');
+        c.innerHTML = '';
+        if (!d.children) return;
+        d.children.forEach(ch => {
+            const s = document.createElement('span');
+            // 📁 for folders, nothing for files
+            const glyph = ch.children ? '📁 ' : '';
+            s.textContent = glyph + displayText(ch.data);
+            c.appendChild(s);
+        });
+    }
+
+    /***************** Renderer *****************/
+    function render(depth) {
+        if (!crumbs.length)
+            return;
+        g.selectAll('*').remove();
+        const w = innerWidth,
+            h = innerHeight,
+            R = Math.min(w, h) / 2,
+            ring = R / (depth + 1);
+        const root = d3.hierarchy(crumbs[crumbs.length - 1]).sum(d => d.size || 0);
+        (function angle(node, start, end) {
+            node.x0 = start;
+            node.x1 = end;
+            if (!node.children)
+                return;
+            // Use log scale so huge folders don’t dominate the ring widths
+            const tot = node.children.reduce(
+                (s, c) => s + Math.log10((c.value || 0) + 1),
+                0
+            );
+            // If tot === 0, fall back to equal slices
+            if (!tot) {
+                const step = (end - start) / node.children.length;
+                node.children.forEach((c, i) => angle(c, start + i * step, start + (i + 1) * step));
+                return;
+            }
+            let cur = start;
+            node.children.forEach(c => {
+                const span =
+                    Math.log10((c.value || 0) + 1) / tot * (end - start);
+                angle(c, cur, cur + span);
+                cur += span;
+            });
+        })(root, 0, 2 * Math.PI);
+        const nodes = root.descendants().filter(d => d.depth <= depth);
+        const arc = d3.arc().startAngle(d => d.x0).endAngle(d => d.x1).innerRadius(d => d.depth * ring).outerRadius(d => d.depth * ring + ring);
+        g.attr('transform', `translate(${w / 2},${h / 2})`).selectAll('path').data(nodes).join('path')
+        .attr('d', arc)
+        .attr('fill', d => {
+            /* store base colour so we can restore it later */
+            if (d.depth === 0){
+                d._baseColor = '#fff';
+            }else{
+                const c = d3.color(rainbow((d.x0 + d.x1) / 2)).brighter(.7);
+                c.opacity = 0.9 - d.depth * 0.08;
+                d._baseColor = c.formatRgb();
+            }
+            return d._baseColor;
+        })
+        .attr('stroke', '#fff')
+        .style('cursor', 'pointer')   /* NEW – leaf nodes look clickable too */
+        .on('mouseover', function (e, d) {
+            d3.select(this)
+              .attr('fill', d3.color(d._baseColor).darker(0.7).formatRgb())
+              .attr('filter', 'url(#glow)');
+        })
+        .on('click', (e, d) => {
+            /* NEW — rebuild full path: top-level root → … → clicked node */
+            crumbs = [];
+            let n = d.data;                    // start at clicked node’s data object
+            while (n) {
+                crumbs.unshift(n);             // unshift puts root first
+                n = n.parentRef;               // climb the stored parent chain
+            }
+
+            updateBreadcrumbs();               // show the entire trace
+
+            /* Zoom only if the target is a folder */
+            if (d.children) {
+                render(depth);
+            }
+        })
+        .on('mousemove', async (e, d) => {
+            tooltip.style.display = 'block';
+            tooltip.style.left = `${e.pageX + 10}px`;
+            tooltip.style.top = `${e.pageY + 10}px`;
+            const total    = d.children ? d.children.length : 0;
+            const folders  = d.children ? d.children.filter(c => c.children).length : 0;
+            const files    = total - folders;
+
+            // provisional text while summary loads
+            tooltip.innerHTML = `<strong>${displayText(d.data)}</strong><br>
+                <small>${d.data.name}</small><br>
+                ${(d.value||0).toFixed(2)} MB — ${folders} 📁 / ${files} 📄<br>
+                <em>loading details…</em>`;
+
+            // fetch / cache summary
+            const summary = await ensureSummary(d.data, currentFP);
+            if(tooltip.style.display!=='none'){     // still on the same node
+              tooltip.innerHTML = `<strong>${displayText(d.data)}</strong><br>
+                <small>${d.data.name}</small><br>
+                ${(d.value||0).toFixed(2)} MB — ${folders} 📁 / ${files} 📄<br>
+                ${summary}`;
+            }
+            showAncestors(d);
+            showChildren(d);
+        })
+        .on('mouseout', (e, d) => {
+            /* restore original colour & remove glow */
+            d3.select(e.currentTarget)
+              .attr('fill', d._baseColor)
+              .attr('filter', null);
+            tooltip.style.display = 'none';
+            $('ancestors').innerHTML = '';
+            $('children').innerHTML = '';
+        });
+    }
+
+    /***************** Event bindings *****************/
+    $('pickBtn').onclick = () => $('filePicker').click();
+    $('filePicker').onchange = async e => {
+    const files = [...e.target.files];
+    if (!files.length)
+        return;
+    selectedFiles = files;     /* NEW — cache selection for “Refresh” */
+
+    /* ---------- show scan progress ---------- */
+    $('progressWrap').style.display = 'block';
+    $('progressBar').style.width = '0%'; // reset once at start
+
+    setProgressPhase('#2196f3'); // blue for scan
+
+    // ---------- cache branch ----------
+    const fp = folderFingerprint(files);
+    currentFP = fp;
+
+    let tree = loadSemanticInfo(fp);
+    if (!tree) {
+        setProgressPhase('#2196f3'); // blue for scan
+        tree = buildTree(files, (done, total) => {
+            updateProgress(done / total);
+        });
+        updateProgress(1);
+        saveSemanticInfo(fp, tree); // save fresh tree to cache
+    } else {
+        restoreParents(tree); // fix missing parentRef pointers
+    }
+
+    // Even if loaded from cache, rerun LLM if API key is present
+    if (localStorage.getItem("OPENAI_KEY")) {
+        setProgressPhase('#4caf50'); // green for semantic titles
+        await assignTitles(tree, false, updateProgress);
+        updateProgress(1);
+
+        setProgressPhase('#9caf50'); // grey for summaries
+        await ensureSummary(tree, currentFP);
+        updateProgress(1);
+    }
+
+    crumbs = [tree];
+    updateBreadcrumbs();
+    render(+$('depthRange').value);
+
+    /* hide bar immediately if no LLM work was done */
+    if (!localStorage.getItem('OPENAI_KEY')){
+        $('progressBar').style.width = '100%';
+        setTimeout(() => $('progressWrap').style.display = 'none', 300);
+    }
+
+    /* allow selecting the same folder again */
+    e.target.value = '';
+};
+    $('depthRange').oninput = e => {
+        $('depthVal').textContent = e.target.value;
+        if (crumbs.length)
+            render(+e.target.value);
+    };
+    window.addEventListener('resize', () => {
+        if (crumbs.length)
+            render(+$('depthRange').value);
+    });
+    $("refreshBtn").onclick = async () => {
+  if (!selectedFiles.length) return;
+
+  // Clear all LLM-related cache for this folder
+  Object.keys(localStorage)
+    .filter(k => k.startsWith(`${CACHE_PREFIX}${currentFP}`))
+    .forEach(k => localStorage.removeItem(k));
+
+  // Show progress bar
+  $("progressWrap").style.display = "block";
+  $("progressBar").style.width = "0%"; // reset once at start
+  setProgressPhase('#2196f3'); // blue
+  const files = selectedFiles;
+
+  // Include progress callback during scan (reuse 30%)
+  const tree = buildTree(files, (done, total) => {
+    updateProgress(done / total);
+  });
+  updateProgress(1);
+
+  setProgressPhase('#4caf50'); // green
+  await assignTitles(tree, true, updateProgress);
+  updateProgress(1);
+
+  currentFP = folderFingerprint(files);
+  saveSemanticInfo(currentFP, tree);
+
+  crumbs = [tree];
+  updateBreadcrumbs();
+  render(+$("depthRange").value);
+
+  if (localStorage.getItem("OPENAI_KEY")) {
+      setProgressPhase('#9e9e9e'); // grey for summaries
+      await ensureSummary(crumbs[0], currentFP);
+      updateProgress(1);
+  }
+
+  // Hide bar if no API key
+  if (!localStorage.getItem("OPENAI_KEY")) {
+    $("progressBar").style.width = "100%";
+    setTimeout(() => $("progressWrap").style.display = "none", 300);
+  }
+};
+    </script>
+</body>
+</html>
